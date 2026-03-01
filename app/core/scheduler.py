@@ -75,5 +75,5 @@ def init_scheduler():
 
 
 def shutdown_scheduler():
-    scheduler.shutdown()
+    scheduler.shutdown(wait=False)
     logger.info("스케줄러 종료")

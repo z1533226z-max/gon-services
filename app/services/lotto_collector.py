@@ -14,16 +14,19 @@ def collect_latest() -> str:
     last = execute_one("SELECT MAX(round) as max_round FROM lotto_results")
     last_round = last["max_round"] if last and last["max_round"] else 0
 
-    # 2. smok95 API에서 최신 회차부터 순차 수집
+    # 2. smok95 API에서 최신 회차부터 순차 수집 (최대 10회차까지)
     new_count = 0
     current = last_round + 1
+    max_fetch = 10  # 무한루프 방지 상한
 
-    while True:
+    for _ in range(max_fetch):
         data = _fetch_round(settings.lotto_api_url, current)
         if not data:
             break
 
-        _insert_round(data)
+        if not _insert_round(data):
+            break
+
         new_count += 1
         logger.info(f"[Collector] {current}회차 수집 완료")
         current += 1
@@ -57,7 +60,8 @@ def collect_range(start: int, end: int) -> str:
             logger.warning(f"[Collector] {round_no}회차 데이터 없음 (API)")
             continue
 
-        _insert_round(data)
+        if not _insert_round(data):
+            continue
         collected += 1
 
         if collected % 100 == 0:
@@ -83,8 +87,8 @@ def _fetch_round(base_url: str, round_no: int) -> dict | None:
         return None
 
 
-def _insert_round(data: dict) -> None:
-    """API 응답 데이터를 DB에 INSERT
+def _insert_round(data: dict) -> bool:
+    """API 응답 데이터를 DB에 INSERT. 성공 시 True 반환.
 
     smok95 API 응답 예시:
     {
@@ -92,7 +96,7 @@ def _insert_round(data: dict) -> None:
         "numbers": [10, 23, 29, 33, 37, 40],
         "bonus_no": 16,
         "date": "2002-12-07T00:00:00Z",
-        "divisions": [{}, {"prize": 143934100, "winners": 1}, ...],
+        "divisions": [{"prize": 1740011646, "winners": 18}, {"prize": 47454864, "winners": 110}, ...],
         "total_sales_amount": 3681782000
     }
     """
@@ -101,27 +105,42 @@ def _insert_round(data: dict) -> None:
     numbers = data.get("numbers", [])
     bonus = data.get("bonus_no")
 
-    # 1등 상금/당첨자 — divisions[1] (index 0은 빈 객체)
+    # 1등 상금/당첨자 — divisions[0]
     divisions = data.get("divisions", [])
     prize_1st = None
     winners_1st = None
-    if len(divisions) > 1:
-        prize_1st = divisions[1].get("prize")
-        winners_1st = divisions[1].get("winners")
+    if len(divisions) > 0 and divisions[0]:
+        prize_1st = divisions[0].get("prize")
+        winners_1st = divisions[0].get("winners")
 
-    if not round_no or len(numbers) < 6:
-        logger.warning(f"[Collector] 불완전한 데이터 스킵: {data}")
-        return
+    # 필수 필드 검증
+    if not round_no or len(numbers) < 6 or bonus is None or not draw_date:
+        logger.warning(f"[Collector] 불완전한 데이터 스킵: draw_no={round_no}")
+        return False
 
-    execute_insert(
-        """
-        INSERT INTO lotto_results (round, draw_date, num1, num2, num3, num4, num5, num6, bonus, prize_1st, winners_1st)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (round) DO NOTHING
-        """,
-        (
-            round_no, draw_date,
-            numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5],
-            bonus, prize_1st, winners_1st,
-        ),
-    )
+    # 번호 범위 검증 (1~45)
+    if not all(isinstance(n, int) and 1 <= n <= 45 for n in numbers):
+        logger.warning(f"[Collector] 범위 벗어난 번호 스킵: {round_no}회, numbers={numbers}")
+        return False
+
+    if not (isinstance(bonus, int) and 1 <= bonus <= 45):
+        logger.warning(f"[Collector] 범위 벗어난 보너스 스킵: {round_no}회, bonus={bonus}")
+        return False
+
+    try:
+        execute_insert(
+            """
+            INSERT INTO lotto_results (round, draw_date, num1, num2, num3, num4, num5, num6, bonus, prize_1st, winners_1st)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (round) DO NOTHING
+            """,
+            (
+                round_no, draw_date,
+                numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5],
+                bonus, prize_1st, winners_1st,
+            ),
+        )
+        return True
+    except Exception as e:
+        logger.error(f"[Collector] DB INSERT 실패 ({round_no}회): {e}")
+        return False

@@ -4,7 +4,7 @@ router = APIRouter()
 
 
 @router.get("/health")
-async def health_check():
+def health_check():
     """시스템 헬스 체크"""
     from app.core.database import test_connection
 

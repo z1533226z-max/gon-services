@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from app.core.database import execute_query, execute_one
 from app.core.logger import logger
 
@@ -6,7 +6,7 @@ router = APIRouter()
 
 
 @router.get("/latest")
-async def get_latest():
+def get_latest():
     """최신 회차 데이터 반환"""
     row = execute_one(
         "SELECT * FROM lotto_results ORDER BY round DESC LIMIT 1"
@@ -17,7 +17,7 @@ async def get_latest():
 
 
 @router.get("/results")
-async def get_results(
+def get_results(
     from_round: int = Query(default=1, alias="from", ge=1),
     to_round: int = Query(default=9999, alias="to", ge=1),
 ):
@@ -30,7 +30,7 @@ async def get_results(
 
 
 @router.get("/round/{round_no}")
-async def get_round(round_no: int):
+def get_round(round_no: int = Path(ge=1)):
     """특정 회차 조회"""
     row = execute_one(
         "SELECT * FROM lotto_results WHERE round = %s",
@@ -42,7 +42,7 @@ async def get_round(round_no: int):
 
 
 @router.get("/statistics")
-async def get_statistics():
+def get_statistics():
     """통계 데이터 반환"""
     total = execute_one("SELECT COUNT(*) as count, MAX(round) as max_round FROM lotto_results")
     if not total or total["count"] == 0:
@@ -77,7 +77,7 @@ async def get_statistics():
 
 
 @router.post("/collect")
-async def trigger_collect():
+def trigger_collect():
     """수동 데이터 수집 트리거 (API Key 인증 필요)"""
     from app.services.lotto_collector import collect_latest
 
