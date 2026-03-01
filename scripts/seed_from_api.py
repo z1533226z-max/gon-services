@@ -30,25 +30,9 @@ def main():
 
     logger.info("DB 연결 성공. 시딩 시작...")
 
-    # 테이블 자동 생성 (main.py의 마이그레이션과 동일)
-    from app.core.database import execute_insert
-    execute_insert("""
-        CREATE TABLE IF NOT EXISTS lotto_results (
-            round       INTEGER PRIMARY KEY,
-            draw_date   DATE NOT NULL,
-            num1        SMALLINT NOT NULL,
-            num2        SMALLINT NOT NULL,
-            num3        SMALLINT NOT NULL,
-            num4        SMALLINT NOT NULL,
-            num5        SMALLINT NOT NULL,
-            num6        SMALLINT NOT NULL,
-            bonus       SMALLINT NOT NULL,
-            prize_1st   BIGINT,
-            winners_1st INTEGER,
-            created_at  TIMESTAMPTZ DEFAULT NOW()
-        )
-    """)
-    execute_insert("CREATE INDEX IF NOT EXISTS idx_lotto_draw_date ON lotto_results(draw_date DESC)")
+    # 테이블 자동 생성 (공유 마이그레이션 사용)
+    from app.core.migrations import run_migrations
+    run_migrations()
 
     if args.to_round > 0:
         # 범위 지정

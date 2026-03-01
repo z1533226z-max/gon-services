@@ -6,53 +6,37 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config import get_settings
 from app.api.router import api_router
 from app.core.logger import logger
-from app.core.database import test_connection, execute_insert
+from app.core.database import test_connection, close_pool
 from app.core.scheduler import init_scheduler, shutdown_scheduler
-
-
-def _run_migrations():
-    """자동 DB 마이그레이션 — 테이블 생성 (멱등)"""
-    migrations = [
-        """
-        CREATE TABLE IF NOT EXISTS lotto_results (
-            round       INTEGER PRIMARY KEY,
-            draw_date   DATE NOT NULL,
-            num1        SMALLINT NOT NULL,
-            num2        SMALLINT NOT NULL,
-            num3        SMALLINT NOT NULL,
-            num4        SMALLINT NOT NULL,
-            num5        SMALLINT NOT NULL,
-            num6        SMALLINT NOT NULL,
-            bonus       SMALLINT NOT NULL,
-            prize_1st   BIGINT,
-            winners_1st INTEGER,
-            created_at  TIMESTAMPTZ DEFAULT NOW()
-        )
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_lotto_draw_date ON lotto_results(draw_date DESC)",
-    ]
-    for sql in migrations:
-        try:
-            execute_insert(sql)
-        except Exception as e:
-            logger.warning(f"마이그레이션 실패 (무시): {e}")
-    logger.info("DB 마이그레이션 완료")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("GON-SERVICES 백엔드 시작")
+    settings = get_settings()
 
+    # API Key 미설정 경고
+    if not settings.api_key:
+        logger.warning("API_KEY 미설정 — POST 엔드포인트가 무인증 상태입니다")
+
+    # DB 연결 + 마이그레이션
     if test_connection():
         logger.info("DB 연결 성공")
-        _run_migrations()
+        try:
+            from app.core.migrations import run_migrations
+            run_migrations()
+        except Exception as e:
+            logger.error(f"마이그레이션 실패 — 서버 기동 중단: {e}")
+            raise
     else:
-        logger.warning("DB 연결 실패 -- 환경변수 확인 필요")
+        logger.error("DB 연결 실패 — 서버 기동 중단. DATABASE_URL을 확인하세요.")
+        raise RuntimeError("DB 연결 실패")
 
     init_scheduler()
     yield
 
     shutdown_scheduler()
+    close_pool()
     logger.info("GON-SERVICES 백엔드 종료")
 
 
@@ -81,9 +65,17 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
 
         api_key = request.headers.get("X-API-Key", "")
-        if not api_key or not hmac.compare_digest(api_key, settings.api_key):
+
+        # 키 누락 → 401, 키 불일치 → 403
+        if not api_key:
             return Response(
-                content='{"detail":"Invalid or missing API key"}',
+                content='{"detail":"API key required"}',
+                status_code=401,
+                media_type="application/json",
+            )
+        if not hmac.compare_digest(api_key, settings.api_key):
+            return Response(
+                content='{"detail":"Invalid API key"}',
                 status_code=403,
                 media_type="application/json",
             )
@@ -97,7 +89,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="GON-SERVICES API",
         description="로또 데이터 자동 수집 및 제공 백엔드",
-        version="1.0.0",
+        version="1.1.0",
         lifespan=lifespan,
     )
 

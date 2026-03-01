@@ -9,11 +9,16 @@ scheduler = AsyncIOScheduler(timezone=KST)
 
 
 def _run_sync(func, *args):
-    """동기 함수를 스케줄러에서 실행할 래퍼"""
-    try:
-        func(*args)
-    except Exception as e:
-        logger.error(f"[Scheduler] {func.__name__} 실행 실패: {e}")
+    """동기 함수를 스케줄러에서 실행할 래퍼 (1회 재시도 포함)"""
+    import time
+    for attempt in range(2):
+        try:
+            func(*args)
+            return
+        except Exception as e:
+            logger.error(f"[Scheduler] {func.__name__} 실행 실패 (시도 {attempt + 1}/2): {e}")
+            if attempt == 0:
+                time.sleep(30)  # 30초 후 재시도
 
 
 def _job_error_listener(event):
