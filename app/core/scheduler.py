@@ -19,6 +19,8 @@ def _run_sync(func, *args):
             logger.error(f"[Scheduler] {func.__name__} 실행 실패 (시도 {attempt + 1}/2): {e}")
             if attempt == 0:
                 time.sleep(30)  # 30초 후 재시도
+            else:
+                raise  # APScheduler의 EVENT_JOB_ERROR 및 실패 로그로 전파
 
 
 def _job_error_listener(event):
