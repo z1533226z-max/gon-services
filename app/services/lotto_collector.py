@@ -22,11 +22,11 @@ def collect_latest() -> str:
     with httpx.Client(timeout=10) as client:
         for _ in range(max_fetch):
             data = _fetch_round(client, settings.lotto_api_url, current)
-            if not data:
+            if data is None:
                 break
 
             if not _insert_round(data):
-                break
+                raise ValueError(f"Invalid round data: {current}")
 
             new_count += 1
             logger.info(f"[Collector] {current}회차 수집 완료")
@@ -60,12 +60,12 @@ def collect_range(start: int, end: int) -> str:
                 continue
 
             data = _fetch_round(client, settings.lotto_api_url, round_no)
-            if not data:
+            if data is None:
                 logger.warning(f"[Collector] {round_no}회차 데이터 없음 (API)")
                 continue
 
             if not _insert_round(data):
-                continue
+                raise ValueError(f"Invalid round data: {round_no}")
             collected += 1
 
             if collected % 100 == 0:
@@ -78,17 +78,14 @@ def collect_range(start: int, end: int) -> str:
 def _fetch_round(client: httpx.Client, base_url: str, round_no: int) -> dict | None:
     """smok95 API에서 특정 회차 데이터 조회"""
     url = f"{base_url}/{round_no}.json"
-    try:
-        resp = client.get(url)
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        return resp.json()
-    except httpx.HTTPStatusError:
+    resp = client.get(url)
+    if resp.status_code == 404:
         return None
-    except Exception as e:
-        logger.error(f"[Collector] API 요청 실패 ({round_no}): {e}")
-        return None
+    resp.raise_for_status()
+    data = resp.json()
+    if not isinstance(data, dict):
+        raise ValueError(f"Invalid round response: {round_no}")
+    return data
 
 
 def _insert_round(data: dict) -> bool:
@@ -161,4 +158,4 @@ def _insert_round(data: dict) -> bool:
         return True
     except Exception as e:
         logger.error(f"[Collector] DB INSERT 실패 ({round_no}회): {e}")
-        return False
+        raise

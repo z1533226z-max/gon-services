@@ -108,7 +108,7 @@ def trigger_collect():
         result = collect_latest()
         return {"status": "ok", "result": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"수집 실패: {e}")
+        raise HTTPException(status_code=500, detail="수집 실패") from e
 
 
 def _format_result(row: dict) -> dict:
